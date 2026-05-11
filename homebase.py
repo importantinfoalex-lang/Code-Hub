@@ -9,7 +9,8 @@ from sklearn.metrics import accuracy_score
 st.set_page_config(page_title="AI Trading Lab", page_icon="📈", layout="wide")
 
 st.title("AI Trading Lab")
-st.caption("Simple signal dashboard for personal use")
+st.caption("Search a company, run a signal model, and review the backtest")
+
 ticker_map = {
     "Apple": "AAPL",
     "Microsoft": "MSFT",
@@ -19,18 +20,17 @@ ticker_map = {
     "Alphabet": "GOOGL",
     "Meta": "META",
     "SPY ETF": "SPY",
-    "QQQ ETF": "QQQ"
+    "QQQ ETF": "QQQ",
+    "IWM ETF": "IWM"
 }
 
 with st.sidebar:
-    st.header("Ticker Search")
-    company = st.selectbox("Search by company", list(ticker_map.keys()))
+    st.header("Search")
+    company = st.selectbox("Company / ETF", list(ticker_map.keys()))
     ticker = ticker_map[company]
-    st.write("Selected ticker:", ticker)
+    st.write("Ticker:", ticker)
 
-with st.sidebar:
     st.header("Settings")
-    ticker = st.text_input("Ticker", "SPY")
     start = st.date_input("Start date")
     end = st.date_input("End date")
     threshold = st.slider("Buy threshold", 0.50, 0.70, 0.55, 0.01)
@@ -54,11 +54,29 @@ def make_features(df):
     out["target"] = (out["Close"].shift(-1) > out["Close"]).astype(int)
     return out.dropna()
 
+def apply_cooldown(raw_signal, cooldown):
+    final_signal = []
+    in_position = 0
+    cool = 0
+    for sig in raw_signal:
+        if cool > 0:
+            final_signal.append(in_position)
+            cool -= 1
+            continue
+        if sig == 1 and in_position == 0:
+            in_position = 1
+            cool = cooldown
+        elif sig == 0 and in_position == 1:
+            in_position = 0
+            cool = cooldown
+        final_signal.append(in_position)
+    return final_signal
+
 if run:
     df = load_data(ticker, start, end)
 
     if df.empty or len(df) < 60:
-        st.error("Not enough data.")
+        st.error("Not enough data for a reliable model.")
     else:
         feat = make_features(df)
         cols = ["ret1", "ret5", "trend", "vol10"]
@@ -74,29 +92,9 @@ if run:
 
         feat["prob_up"] = model.predict_proba(X)[:, 1]
         feat["raw_signal"] = (feat["prob_up"] > threshold).astype(int)
+        feat["signal"] = apply_cooldown(feat["raw_signal"].tolist(), cooldown)
 
-        final_signal = []
-        in_position = 0
-        cool = 0
-
-        for sig in feat["raw_signal"]:
-            if cool > 0:
-                final_signal.append(in_position)
-                cool -= 1
-                continue
-
-            if sig == 1 and in_position == 0:
-                in_position = 1
-                cool = cooldown
-            elif sig == 0 and in_position == 1:
-                in_position = 0
-                cool = cooldown
-
-            final_signal.append(in_position)
-
-        feat["signal"] = final_signal
         feat["position"] = feat["signal"].shift(1).fillna(0)
-
         feat["trade_change"] = feat["signal"].diff().fillna(0)
         feat["trade_cost"] = np.where(feat["trade_change"] != 0, fee, 0)
 
@@ -116,12 +114,13 @@ if run:
         latest = feat.iloc[-1]
         signal = "BUY" if latest["prob_up"] > threshold else "CASH"
 
-        k1, k2, k3 = st.columns(3)
+        k1, k2, k3, k4 = st.columns(4)
         k1.metric("Test accuracy", f"{acc:.2%}")
         k2.metric("Latest up probability", f"{latest['prob_up']:.2%}")
-        k3.metric("Signal", signal)
+        k3.metric("Current signal", signal)
+        k4.metric("Last close", f"${latest['Close']:.2f}")
 
-        tab1, tab2, tab3 = st.tabs(["Price", "Backtest", "Trades"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Price", "Backtest", "Trades", "Data"])
 
         with tab1:
             fig = go.Figure()
@@ -139,12 +138,15 @@ if run:
 
         with tab2:
             st.line_chart(feat[["strategy_equity", "buy_hold_equity"]])
+            st.write("Strategy includes transaction costs and cooldown logic.")
 
         with tab3:
             trade_log = feat.loc[feat["trade_change"] != 0, ["Close", "prob_up", "signal", "trade_cost"]].copy()
             trade_log["action"] = np.where(trade_log["signal"] == 1, "BUY", "SELL")
             st.dataframe(trade_log[["action", "Close", "prob_up", "trade_cost"]].sort_index(ascending=False))
 
-else:
-    st.info("Set your ticker and dates in the sidebar, then tap Run model.")
+        with tab4:
+            st.dataframe(feat.tail(20)[["Close", "prob_up", "raw_signal", "signal", "strategy_equity", "buy_hold_equity"]])
 
+else:
+    st.info("Choose a company in the sidebar, set dates, then tap Run model.")
