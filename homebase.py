@@ -10,6 +10,23 @@ st.set_page_config(page_title="AI Trading Lab", page_icon="📈", layout="wide")
 
 st.title("AI Trading Lab")
 st.caption("Simple signal dashboard for personal use")
+ticker_map = {
+    "Apple": "AAPL",
+    "Microsoft": "MSFT",
+    "NVIDIA": "NVDA",
+    "Amazon": "AMZN",
+    "Tesla": "TSLA",
+    "Alphabet": "GOOGL",
+    "Meta": "META",
+    "SPY ETF": "SPY",
+    "QQQ ETF": "QQQ"
+}
+
+with st.sidebar:
+    st.header("Ticker Search")
+    company = st.selectbox("Search by company", list(ticker_map.keys()))
+    ticker = ticker_map[company]
+    st.write("Selected ticker:", ticker)
 
 with st.sidebar:
     st.header("Settings")
