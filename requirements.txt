@@ -4,3 +4,4 @@ pandas
 numpy
 scikit-learn
 plotly
+alpha_vantage
